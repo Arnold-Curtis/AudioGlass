@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
 using TransparencyMode.Core;
@@ -32,12 +33,8 @@ namespace TransparencyMode.App
             InitializeTrayIcon();
             InitializeEventHandlers();
             
-            // Auto-start if previously enabled
-            if (_settings.IsEnabled && !string.IsNullOrEmpty(_settings.LastInputDeviceId) && 
-                !string.IsNullOrEmpty(_settings.LastOutputDeviceId))
-            {
-                TryAutoStart();
-            }
+            // Auto-start (Transparency Mode enabled by default)
+            TryAutoStart();
         }
 
         private void InitializeTrayIcon()
@@ -83,12 +80,27 @@ namespace TransparencyMode.App
             _deviceManager.DeviceAdded += DeviceManager_DeviceAdded;
             _audioEngine.ErrorOccurred += AudioEngine_ErrorOccurred;
             _audioEngine.DeviceDisconnected += AudioEngine_DeviceDisconnected;
+            _audioEngine.IsRunningChanged += (s, isRunning) => _syncContext.Post(_ => UpdateTrayStatus(), null);
         }
 
         private void TryAutoStart()
         {
             try
             {
+                // If no devices saved, try to find defaults
+                if (string.IsNullOrEmpty(_settings.LastInputDeviceId) || string.IsNullOrEmpty(_settings.LastOutputDeviceId))
+                {
+                    var input = _deviceManager.GetInputDevices().FirstOrDefault(d => d.IsDefault);
+                    var output = _deviceManager.GetOutputDevices().FirstOrDefault(d => d.IsDefault);
+                    
+                    if (input != null && output != null)
+                    {
+                        _settings.LastInputDeviceId = input.Id;
+                        _settings.LastOutputDeviceId = output.Id;
+                        SettingsManager.Save(_settings);
+                    }
+                }
+
                 var inputDevice = _deviceManager.GetDeviceById(_settings.LastInputDeviceId!);
                 var outputDevice = _deviceManager.GetDeviceById(_settings.LastOutputDeviceId!);
 
@@ -99,13 +111,21 @@ namespace TransparencyMode.App
                     _audioEngine.LowLatencyMode = _settings.LowLatencyMode;
                     _audioEngine.Start(inputDevice, outputDevice);
                     
-                    UpdateTrayStatus(true);
+                    // Ensure settings reflect the running state
+                    if (!_settings.IsEnabled)
+                    {
+                        _settings.IsEnabled = true;
+                        SettingsManager.Save(_settings);
+                    }
+
+                    // UpdateTrayStatus will be called by the event handler
                 }
             }
             catch
             {
                 // Auto-start failed, user will need to configure manually
                 _settings.IsEnabled = false;
+                SettingsManager.Save(_settings);
             }
         }
 
@@ -116,7 +136,7 @@ namespace TransparencyMode.App
                 _audioEngine.Stop();
                 _settings.IsEnabled = false;
                 SettingsManager.Save(_settings);
-                UpdateTrayStatus(false);
+                UpdateTrayStatus();
             }
             else
             {
@@ -142,7 +162,7 @@ namespace TransparencyMode.App
                 _settingsForm.FormClosed += (s, args) =>
                 {
                     _settings = SettingsManager.Load();
-                    UpdateTrayStatus(_audioEngine.IsRunning);
+                    UpdateTrayStatus();
                 };
             }
 
@@ -171,7 +191,7 @@ namespace TransparencyMode.App
                 (deviceId == _settings.LastInputDeviceId || deviceId == _settings.LastOutputDeviceId))
             {
                 _audioEngine.Stop();
-                UpdateTrayStatus(false);
+                UpdateTrayStatus();
                 
                 _trayIcon.ShowBalloonTip(3000, "Device Disconnected", 
                     "Audio device was removed. Transparency Mode paused.", ToolTipIcon.Warning);
@@ -197,7 +217,7 @@ namespace TransparencyMode.App
             _syncContext.Post(_ =>
             {
                 _audioEngine.Stop();
-                UpdateTrayStatus(false);
+                UpdateTrayStatus();
                 
                 _trayIcon.ShowBalloonTip(5000, "Audio Engine Error", 
                     $"Error: {e.Message}", ToolTipIcon.Error);
@@ -208,15 +228,17 @@ namespace TransparencyMode.App
         {
             _syncContext.Post(_ =>
             {
-                UpdateTrayStatus(false);
+                UpdateTrayStatus();
                 
                 _trayIcon.ShowBalloonTip(3000, "Device Disconnected", 
                     "Audio device stopped responding. Transparency Mode paused.", ToolTipIcon.Warning);
             }, null);
         }
 
-        private void UpdateTrayStatus(bool isActive)
+        private void UpdateTrayStatus()
         {
+            bool isActive = _audioEngine.IsRunning;
+
             if (isActive)
             {
                 _statusMenuItem.Text = "Status: Active ✓";

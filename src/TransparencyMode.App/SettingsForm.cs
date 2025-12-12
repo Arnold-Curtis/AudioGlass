@@ -5,6 +5,8 @@ using TransparencyMode.Core;
 using TransparencyMode.Core.Audio;
 using TransparencyMode.Core.Models;
 
+using System.Reflection;
+
 namespace TransparencyMode.App
 {
     public partial class SettingsForm : Form
@@ -24,6 +26,17 @@ namespace TransparencyMode.App
             InitializeEventHandlers();
             LoadDevices();
             LoadSettings();
+
+            // Set generic icon
+            try
+            {
+                var entryAssembly = Assembly.GetEntryAssembly();
+                if (entryAssembly != null)
+                {
+                    this.Icon = System.Drawing.Icon.ExtractAssociatedIcon(entryAssembly.Location);
+                }
+            }
+            catch { }
         }
 
         private void InitializeEventHandlers()
@@ -32,6 +45,7 @@ namespace TransparencyMode.App
             btnApply.Click += BtnApply_Click;
             btnClose.Click += BtnClose_Click;
             chkEnabled.CheckedChanged += ChkEnabled_CheckedChanged;
+            chkLowLatency.CheckedChanged += ChkLowLatency_CheckedChanged;
             cmbInputDevice.SelectedIndexChanged += CmbDevice_SelectedIndexChanged;
             cmbOutputDevice.SelectedIndexChanged += CmbDevice_SelectedIndexChanged;
             this.FormClosing += SettingsForm_FormClosing;
@@ -96,7 +110,8 @@ namespace TransparencyMode.App
 
             // Load other settings
             trackVolume.Value = (int)(_settings.Volume * 100);
-            chkEnabled.Checked = _settings.IsEnabled;
+            // Fix: Checkbox should reflect actual engine state
+            chkEnabled.Checked = _audioEngine.IsRunning;
             numBuffer.Value = _settings.BufferMilliseconds;
             chkLowLatency.Checked = _settings.LowLatencyMode;
 
@@ -154,6 +169,19 @@ namespace TransparencyMode.App
                 _audioEngine.Stop();
                 lblStatus.Text = "Transparency Mode Disabled";
                 lblStatus.ForeColor = System.Drawing.Color.Gray;
+                
+                // Ensure we save the disabled state
+                _settings.IsEnabled = false;
+                SettingsManager.Save(_settings);
+            }
+        }
+
+        private void ChkLowLatency_CheckedChanged(object? sender, EventArgs e)
+        {
+            if (chkLowLatency.Checked)
+            {
+                MessageBox.Show("Low Latency Mode is experimental and may cause audio artifacts (crackling) on some devices.\n\nIf you hear distortion, please disable this mode.", 
+                                "Experimental Feature", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
