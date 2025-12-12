@@ -1,0 +1,8 @@
+{
+  "LastInputDeviceId": null,
+  "LastOutputDeviceId": null,
+  "Volume": 1.0,
+  "IsEnabled": false,
+  "BufferMilliseconds": 10,
+  "LowLatencyMode": true
+}
