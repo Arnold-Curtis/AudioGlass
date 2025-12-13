@@ -16,7 +16,7 @@ namespace TransparencyMode.App
         private SettingsForm? _settingsForm;
         
         private readonly DeviceManager _deviceManager;
-        private readonly AudioEngine _audioEngine;
+        private readonly NativeAudioEngine _audioEngine;
         private AppSettings _settings;
 
         private ToolStripMenuItem _toggleMenuItem = null!;
@@ -27,7 +27,7 @@ namespace TransparencyMode.App
         {
             _syncContext = SynchronizationContext.Current ?? new SynchronizationContext();
             _deviceManager = new DeviceManager();
-            _audioEngine = new AudioEngine();
+            _audioEngine = new NativeAudioEngine();
             _settings = SettingsManager.Load();
 
             InitializeTrayIcon();
@@ -101,15 +101,17 @@ namespace TransparencyMode.App
                     }
                 }
 
-                var inputDevice = _deviceManager.GetDeviceById(_settings.LastInputDeviceId!);
-                var outputDevice = _deviceManager.GetDeviceById(_settings.LastOutputDeviceId!);
+                // Validate device IDs exist before starting
+                var inputDeviceExists = _deviceManager.GetDeviceById(_settings.LastInputDeviceId!) != null;
+                var outputDeviceExists = _deviceManager.GetDeviceById(_settings.LastOutputDeviceId!) != null;
 
-                if (inputDevice != null && outputDevice != null)
+                if (inputDeviceExists && outputDeviceExists)
                 {
                     _audioEngine.Volume = _settings.Volume;
                     _audioEngine.BufferMilliseconds = _settings.BufferMilliseconds;
                     _audioEngine.LowLatencyMode = _settings.LowLatencyMode;
-                    _audioEngine.Start(inputDevice, outputDevice);
+                    // Pass device IDs directly to native engine
+                    _audioEngine.Start(_settings.LastInputDeviceId!, _settings.LastOutputDeviceId!);
                     
                     // Ensure settings reflect the running state
                     if (!_settings.IsEnabled)
@@ -212,7 +214,7 @@ namespace TransparencyMode.App
             }
         }
 
-        private void AudioEngine_ErrorOccurred(object? sender, Exception e)
+        private void AudioEngine_ErrorOccurred(object? sender, AudioEngineErrorEventArgs e)
         {
             _syncContext.Post(_ =>
             {
@@ -220,11 +222,11 @@ namespace TransparencyMode.App
                 UpdateTrayStatus();
                 
                 _trayIcon.ShowBalloonTip(5000, "Audio Engine Error", 
-                    $"Error: {e.Message}", ToolTipIcon.Error);
+                    $"Error: {e.Exception.Message}", ToolTipIcon.Error);
             }, null);
         }
 
-        private void AudioEngine_DeviceDisconnected(object? sender, EventArgs e)
+        private void AudioEngine_DeviceDisconnected(object? sender, string deviceId)
         {
             _syncContext.Post(_ =>
             {

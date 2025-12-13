@@ -12,10 +12,10 @@ namespace TransparencyMode.App
     public partial class SettingsForm : Form
     {
         private readonly DeviceManager _deviceManager;
-        private readonly AudioEngine _audioEngine;
+        private readonly NativeAudioEngine _audioEngine;
         private AppSettings _settings;
 
-        public SettingsForm(DeviceManager deviceManager, AudioEngine audioEngine, AppSettings settings)
+        public SettingsForm(DeviceManager deviceManager, NativeAudioEngine audioEngine, AppSettings settings)
         {
             InitializeComponent();
             
@@ -219,17 +219,12 @@ namespace TransparencyMode.App
 
                 if (chkEnabled.Checked)
                 {
-                    var mmInputDevice = _deviceManager.GetDeviceById(inputDevice.Id);
-                    var mmOutputDevice = _deviceManager.GetDeviceById(outputDevice.Id);
-
-                    if (mmInputDevice != null && mmOutputDevice != null)
-                    {
-                        _audioEngine.Stop();
-                        _audioEngine.Start(mmInputDevice, mmOutputDevice);
-                        
-                        lblStatus.Text = "✓ Transparency Mode Active";
-                        lblStatus.ForeColor = System.Drawing.Color.Green;
-                    }
+                    // Pass device IDs directly to native engine
+                    _audioEngine.Stop();
+                    _audioEngine.Start(inputDevice.Id, outputDevice.Id);
+                    
+                    lblStatus.Text = "✓ Transparency Mode Active";
+                    lblStatus.ForeColor = System.Drawing.Color.Green;
                 }
 
                 // Save settings
