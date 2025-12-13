@@ -1,9 +1,16 @@
 /*
  * ==============================================================================
- * TransparencyAudio.h - Native Miniaudio Wrapper for C# Interop
+ * TransparencyAudio.h - Native Miniaudio Wrapper for C# Interop ("Bare Metal")
  * ==============================================================================
  * This header defines the C API exported by TransparencyAudio.dll.
  * The implementation uses Miniaudio (https://miniaud.io) internally.
+ *
+ * "BARE METAL" ARCHITECTURE (December 2025):
+ * - Decoupled capture/playback devices with elastic ring buffer
+ * - Manual clock drift compensation (skip/duplicate frames)
+ * - IAudioClient3 for sub-10ms WASAPI shared mode
+ * - Variable callback size support (noFixedSizedCallback)
+ * - Target latency: ~3-5ms (down from ~100ms)
  *
  * BUILD REQUIREMENTS:
  * - Windows 10/11 SDK
@@ -103,6 +110,8 @@ typedef struct {
 /**
  * Engine configuration structure.
  * Passed to AudioEngine_Initialize.
+ * 
+ * NOTE: New fields added at END for ABI compatibility with existing C# P/Invoke.
  */
 typedef struct {
     wchar_t inputDeviceId[256];     /* Capture device ID */
@@ -114,22 +123,35 @@ typedef struct {
     ta_share_mode shareMode;        /* WASAPI share mode */
     ta_performance_profile perfProfile; /* Performance profile */
     int32_t noAutoConvertSRC;       /* 1 = disable Windows SRC for low latency */
-    int32_t enableResampling;       /* 1 = enable drift compensation */
+    int32_t enableResampling;       /* DEPRECATED: Ignored in "Bare Metal" mode */
     float volume;                   /* Initial volume (0.0 - 1.0) */
+    
+    /* === NEW FIELDS FOR "BARE METAL" ARCHITECTURE === */
+    uint32_t ringBufferSizeFrames;  /* Elastic buffer size (0 = use default 2048) */
+    int32_t noFixedSizedCallback;   /* 1 = enable variable callback (default: 1) */
+    int32_t useDecoupledDevices;    /* 1 = use separate capture/playback (default: 1) */
 } ta_engine_config;
 
 /**
  * Engine status structure.
  * Returned by AudioEngine_GetStatus.
+ * 
+ * NOTE: New fields added at END for ABI compatibility with existing C# P/Invoke.
  */
 typedef struct {
     int32_t isRunning;          /* 1 if running */
     float bufferFillLevel;      /* Buffer fill (0.0 - 1.0) */
-    float actualLatencyMs;      /* Actual latency in ms */
+    float actualLatencyMs;      /* Total round-trip latency in ms */
     uint32_t underrunCount;     /* Buffer underruns since start */
     uint32_t overrunCount;      /* Buffer overruns since start */
     float currentVolume;        /* Current volume */
     ta_result lastError;        /* Last error code */
+    
+    /* === NEW FIELDS FOR "BARE METAL" ARCHITECTURE === */
+    uint32_t driftCorrectionCount;  /* Times drift compensation triggered */
+    float ringBufferFillLevel;      /* Elastic buffer fill (0.0 - 1.0) */
+    float captureLatencyMs;         /* Capture device latency */
+    float playbackLatencyMs;        /* Playback device latency */
 } ta_engine_status;
 
 /* ==============================================================================

@@ -179,6 +179,9 @@ namespace TransparencyMode.Core.Audio
     /// <summary>
     /// Engine configuration passed to native initialization.
     /// All low-latency critical settings are exposed here.
+    /// 
+    /// NOTE: "Bare Metal" architecture (Dec 2025) - now uses decoupled 
+    /// capture/playback devices with manual elastic buffer for ~3ms latency.
     /// </summary>
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct NativeEngineConfig
@@ -216,16 +219,37 @@ namespace TransparencyMode.Core.Audio
         public int NoAutoConvertSRC;
 
         /// <summary>
-        /// Enable the built-in asynchronous resampler for clock drift compensation.
-        /// Set to 1 (true) for duplex streams with different hardware clocks.
+        /// DEPRECATED: Ignored in "Bare Metal" mode.
+        /// Drift compensation is now handled by the manual elastic buffer.
         /// </summary>
         public int EnableResampling;
 
         /// <summary>Initial volume (0.0 to 1.0)</summary>
         public float Volume;
 
+        // === NEW FIELDS FOR "BARE METAL" ARCHITECTURE ===
+
+        /// <summary>
+        /// Size of the elastic ring buffer in frames (0 = use default 2048).
+        /// Smaller = lower latency but less drift tolerance.
+        /// </summary>
+        public uint RingBufferSizeFrames;
+
+        /// <summary>
+        /// Enable variable callback size (noFixedSizedCallback).
+        /// 1 = enabled (default, removes intermediary buffer latency).
+        /// </summary>
+        public int NoFixedSizedCallback;
+
+        /// <summary>
+        /// Use separate capture/playback devices with ring buffer.
+        /// 1 = enabled (default, "Bare Metal" architecture).
+        /// </summary>
+        public int UseDecoupledDevices;
+
         /// <summary>
         /// Creates a default low-latency configuration for transparency mode.
+        /// Uses "Bare Metal" architecture with ~3ms target latency.
         /// </summary>
         public static NativeEngineConfig CreateLowLatency(
             string inputDeviceId,
@@ -238,13 +262,17 @@ namespace TransparencyMode.Core.Audio
                 OutputDeviceId = outputDeviceId ?? string.Empty,
                 SampleRate = 48000,
                 Channels = 2,
-                BufferSizeFrames = 128,  // ~2.6ms at 48kHz - break the 10ms wall!
+                BufferSizeFrames = 128,  // ~2.6ms at 48kHz - IAudioClient3 quantum
                 Format = MaFormat.MA_FORMAT_F32,
                 ShareMode = MaShareMode.MA_SHARE_MODE_SHARED,
                 PerformanceProfile = MaPerformanceProfile.MA_PERFORMANCE_PROFILE_LOW_LATENCY,
                 NoAutoConvertSRC = 1,    // CRITICAL: Enable IAudioClient3 low-latency path
-                EnableResampling = 1,    // Enable native drift compensation
-                Volume = volume
+                EnableResampling = 0,    // Ignored - using manual elastic buffer
+                Volume = volume,
+                // Bare Metal settings
+                RingBufferSizeFrames = 2048,  // ~42ms capacity for drift tolerance
+                NoFixedSizedCallback = 1,     // Remove intermediary buffer latency
+                UseDecoupledDevices = 1       // Use separate capture/playback
             };
         }
 
@@ -267,14 +295,21 @@ namespace TransparencyMode.Core.Audio
                 ShareMode = MaShareMode.MA_SHARE_MODE_SHARED,
                 PerformanceProfile = MaPerformanceProfile.MA_PERFORMANCE_PROFILE_LOW_LATENCY,
                 NoAutoConvertSRC = 1,
-                EnableResampling = 1,
-                Volume = volume
+                EnableResampling = 0,
+                Volume = volume,
+                // Bare Metal settings with more headroom
+                RingBufferSizeFrames = 4096,  // ~85ms capacity
+                NoFixedSizedCallback = 1,
+                UseDecoupledDevices = 1
             };
         }
     }
 
     /// <summary>
     /// Engine status information returned by the native engine.
+    /// 
+    /// NOTE: "Bare Metal" architecture includes additional metrics for
+    /// ring buffer monitoring and drift compensation diagnostics.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct NativeEngineStatus
@@ -285,7 +320,7 @@ namespace TransparencyMode.Core.Audio
         /// <summary>Current buffer fill level (0.0 to 1.0)</summary>
         public float BufferFillLevel;
 
-        /// <summary>Actual latency in milliseconds</summary>
+        /// <summary>Total round-trip latency in milliseconds</summary>
         public float ActualLatencyMs;
 
         /// <summary>Number of buffer underruns since start</summary>
@@ -299,6 +334,26 @@ namespace TransparencyMode.Core.Audio
 
         /// <summary>Last error code</summary>
         public MaResult LastError;
+
+        // === NEW FIELDS FOR "BARE METAL" ARCHITECTURE ===
+
+        /// <summary>
+        /// Number of times drift compensation was triggered (skip/duplicate).
+        /// High values indicate clock mismatch between capture and playback devices.
+        /// </summary>
+        public uint DriftCorrectionCount;
+
+        /// <summary>
+        /// Current elastic ring buffer fill level (0.0 to 1.0).
+        /// Target is 0.5 (50%). Values near 0.25 or 0.75 trigger drift correction.
+        /// </summary>
+        public float RingBufferFillLevel;
+
+        /// <summary>Capture device latency in milliseconds</summary>
+        public float CaptureLatencyMs;
+
+        /// <summary>Playback device latency in milliseconds</summary>
+        public float PlaybackLatencyMs;
     }
 
     /// <summary>

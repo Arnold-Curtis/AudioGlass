@@ -46,3 +46,10 @@ bld/
 # User settings
 appsettings.local.json
 settings.json
+
+# Native build artifacts
+*.obj
+*.exp
+*.lib
+*.pdb
+native/*.dll
